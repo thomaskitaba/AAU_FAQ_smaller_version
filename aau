@@ -1,0 +1,9 @@
+#!/bin/bash
+
+message=$1
+
+git add .
+git commit -m "$message"
+git push
+
+now it seems to be working.  for the future so that i can have the solution or the idea about conflicing packages what did you actually change. and analysed. explain it step by step
