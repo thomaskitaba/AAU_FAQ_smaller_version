@@ -64,3 +64,28 @@ This file will serve as the final application interface using Streamlit. It shou
 | ☐ | App Interface | Streamlit App | Clean UI? Input fields? Buttons? Error handling? |
 | ☐ | Testing | Test Script | 5+ examples with predictions and ground truth? |
 | ☐ | Documentation | Final Files | app.py, test_model.py cleaned? Download_model.py deleted? |
+
+# deployed web works best
+
+### For the Final Code
+
+Final code
+
+1.app.py
+
+This file will serve as the final application interface using Streamlit. It should be clean, well-commented, and easy to navigate. Ensure all functionalities are working as expected and the code follows the best practices we discussed. Include:
+
+- All Streamlit code and imports.
+- The final model pipeline (e.g., using `pipeline` for embedding + BiLSTM). Make sure it loads the model and tokenizer correctly.
+- A clear user interface with input fields for questions and buttons for actions like search.
+- Error handling for cases where the model might not load or an error occurs during inference.
+
+2. test_model.py
+
+- Verify the final optimized code with the cleaned dataset (FAQs with removed HTML/Junk and correct spellings).
+- Include predictions and ground truth for at least 5 examples to demonstrate functionality.
+- Compare results with the BiLSTM-only approach and show performance improvements.
+
+3. Download_model.py
+
+- You can delete this file as the model will be committed directly to the repository for better performance.
