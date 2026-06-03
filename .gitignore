@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual envs
+venv/
+.venv/
+aau_faq/
+.aau_faq/
+
+# Models (VERY IMPORTANT)
+models/
+*.npy
+*.joblib
+*.faiss
+
+# Embeddings
+embeddings.npy
+nn_index.joblib
+
+# IDE
+.vscode/
+
+# OS
+.DS_Store
+
+# Large or unnecessary files
+np
+aau
+
