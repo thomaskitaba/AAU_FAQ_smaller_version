@@ -2,7 +2,7 @@ import streamlit as st
 import json
 import numpy as np
 import faiss
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, util
 
 # -----------------------------
 # 1. PAGE CONFIG
@@ -48,7 +48,7 @@ def preprocess(text):
     return text.lower().strip()
 
 # -----------------------------
-# 5. QUERY EXPANSION (Simple NLP Trick)
+# 5. QUERY EXPANSION
 # -----------------------------
 def expand_query(query):
     synonyms = {
@@ -87,14 +87,13 @@ def build_index():
 index = build_index()
 
 # -----------------------------
-# 8. SEARCH FUNCTION (TOP-K + IMPROVED LOGIC)
+# 8. SEARCH FUNCTION
 # -----------------------------
 def search(query, top_k=5):
     query = preprocess(query)
     query = expand_query(query)
 
     query_vec = model.encode([query], normalize_embeddings=True)
-
     scores, indices = index.search(np.array(query_vec), top_k)
 
     results = []
@@ -105,46 +104,113 @@ def search(query, top_k=5):
             "score": float(score)
         })
 
-    # Rerank (extra safety step)
     results = sorted(results, key=lambda x: x["score"], reverse=True)
-
     return results
 
 # -----------------------------
-# 9. CONFIDENCE CHECK (IMPORTANT IMPROVEMENT)
+# 9. CONFIDENCE CHECK
 # -----------------------------
 def is_confident(results):
     if len(results) < 2:
         return False
-
-    top_score = results[0]["score"]
-    second_score = results[1]["score"]
-
-    return top_score > 0.35
-    # return top_score > 0.45 and (top_score - second_score) > 0.05
-
+    return results[0]["score"] > 0.35
 
 # -----------------------------
-# 10. CHAT MEMORY 
+# 10. CHAT MEMORY
 # -----------------------------
-if "messages" not in st.session_state: 
+if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# -----------------------------
-# 11. DISPLAY HISTORY
-# -----------------------------
+# =========================================================
+# 🧪 EVALUATION DATASET (NEW SECTION)
+# =========================================================
+test_cases = [
+    {
+        "question": "How much do I need to pay for graduate application?",
+        "expected": "The application fee for Graduate Speciality programs is ETB 500."
+    },
+    {
+        "question": "Where should I submit my documents?",
+        "expected": "AAU Admission Office, Main Campus Registrar Building, Room 203."
+    },
+    {
+        "question": "Can I reuse my admission test result?",
+        "expected": "No. The Undergraduate Admission Test (UAT) result is valid only for the specific application cycle."
+    },
+    {
+        "question": "What is the tuition fee payment method?",
+        "expected": "Tuition fees are usually paid in installments per semester, typically two installments per semester or four per year depending on the program."
+    }
+]
+
+# =========================================================
+# 📊 EVALUATION FUNCTIONS
+# =========================================================
+def semantic_score(a, b):
+    emb1 = model.encode(a, convert_to_tensor=True)
+    emb2 = model.encode(b, convert_to_tensor=True)
+    return util.cos_sim(emb1, emb2).item()
+
+
+def run_evaluation():
+    results_summary = []
+    correct = 0
+
+    for item in test_cases:
+        pred_results = search(item["question"])
+        prediction = pred_results[0]["answer"]
+
+        score = semantic_score(prediction, item["expected"])
+
+        is_correct = score >= 0.75
+        if is_correct:
+            correct += 1
+
+        results_summary.append({
+            "question": item["question"],
+            "prediction": prediction,
+            "expected": item["expected"],
+            "score": score,
+            "correct": is_correct
+        })
+
+    accuracy = correct / len(test_cases)
+    return accuracy, results_summary
+
+# =========================================================
+# 📊 SIDEBAR DASHBOARD (NEW UI)
+# =========================================================
+st.sidebar.title("📊 Evaluation Dashboard")
+
+if st.sidebar.button("Run Evaluation"):
+    accuracy, results_summary = run_evaluation()
+
+    st.sidebar.success(f"Accuracy: {accuracy:.2f}")
+
+    st.subheader("🧪 Evaluation Results")
+
+    for r in results_summary:
+        if r["correct"]:
+            st.markdown(f"✅ **{r['question']}**")
+        else:
+            st.markdown(f"❌ **{r['question']}**")
+
+        st.markdown(f"- Predicted: {r['prediction']}")
+        st.markdown(f"- Expected: {r['expected']}")
+        st.markdown(f"- Score: {r['score']:.3f}")
+        st.markdown("---")
+
+# =========================================================
+# 💬 CHAT INTERFACE
+# =========================================================
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# -----------------------------
-# 12. USER INPUT
-# -----------------------------
 user_input = st.chat_input("Ask anything about AAU...")
 
 if user_input:
 
-    # Save user message
     st.session_state.messages.append({
         "role": "user",
         "content": user_input
@@ -153,29 +219,20 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # -------------------------
-    # SEARCH
-    # -------------------------
     results = search(user_input)
-
     best = results[0]
 
-    # -------------------------
-    # RESPONSE LOGIC (IMPROVED)
-    # -------------------------
     if not is_confident(results):
         response = (
             "❌ I couldn't find a highly confident answer.\n\n"
             "Try rephrasing your question or using different keywords."
         )
     else:
-        # Use TOP-3 context (more intelligent behavior)
         context = "\n\n".join([
             f"Q: {r['question']}\nA: {r['answer']}"
             for r in results[:3]
         ])
 
-        # ChatGPT-like structured response (WITHOUT LLM)
         response = f"""
 ✅ **Best Answer:**
 {best['answer']}
@@ -186,17 +243,14 @@ if user_input:
 {context}
 """
 
-    # Save assistant response
     st.session_state.messages.append({
         "role": "assistant",
         "content": response
     })
 
-    # Display assistant message
     with st.chat_message("assistant"):
         st.markdown(response)
 
-        # Debug section
         with st.expander("🔍 Top Matching FAQs (Debug View)"):
             for r in results:
                 st.markdown(f"**Q:** {r['question']}")
