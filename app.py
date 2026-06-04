@@ -120,12 +120,14 @@ def is_confident(results):
     top_score = results[0]["score"]
     second_score = results[1]["score"]
 
-    return top_score > 0.45 and (top_score - second_score) > 0.05
+    return top_score > 0.35
+    # return top_score > 0.45 and (top_score - second_score) > 0.05
+
 
 # -----------------------------
-# 10. CHAT MEMORY
+# 10. CHAT MEMORY 
 # -----------------------------
-if "messages" not in st.session_state:
+if "messages" not in st.session_state: 
     st.session_state.messages = []
 
 # -----------------------------
