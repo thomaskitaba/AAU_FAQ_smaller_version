@@ -330,19 +330,34 @@ if user_input:
     if not confident(results):
         response = "❌ No confident answer found. Try rephrasing."
     else:
-        context = "\n\n".join(
-            f"Q: {r['question']}\nA: {r['answer']}"
-            for r in results[:3]
-        )
+        # Format the top 3 retrieved matches with scores and clear spacing
+        context_items = []
+        for i, r in enumerate(results[:3], 1):
+            # Format multi-line answers properly for blockquotes
+            formatted_answer = "\n".join(f"> {line}" for line in r['answer'].split("\n"))
+            item_str = (
+                f"### {i}. {r['question']}\n"
+                f"🎯 **Match Score:** `{r['score']:.4f}`\n\n"
+                f"💡 **Answer:**\n"
+                f"{formatted_answer}"
+            )
+            context_items.append(item_str)
+        
+        context_formatted = "\n\n---\n\n".join(context_items)
+        
+        formatted_best_answer = "\n".join(f"> {line}" for line in best['answer'].split("\n"))
 
         response = f"""
-✅ **Answer:**
-{best['answer']}
+🏆 **Top Answer (Confidence Score: `{best['score']:.4f}`):**
+
+{formatted_best_answer}
 
 ---
 
-🔎 **Hybrid Context (BM25 + FAISS):**
-{context}
+### 🔎 Hybrid Context Matches (BM25 + FAISS)
+Here are the most relevant FAQ matches retrieved from the database:
+
+{context_formatted}
 """
 
     st.session_state.messages.append({"role": "assistant", "content": response})
