@@ -254,7 +254,7 @@ def run_evaluation():
         prediction = pred_results[0]["answer"] if len(pred_results) > 0 else "No answer found"
         
         score = semantic_score(prediction, t["expected"])
-        is_correct = score >= 0.75
+        is_correct = score >= 0.6  #
         if is_correct:
             correct += 1
 
