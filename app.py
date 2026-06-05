@@ -17,7 +17,7 @@ st.set_page_config(
     layout="centered"
 )
 
-st.title("🎓 AAU Hybrid FAQ Chatbot (BM25 + FAISS + Intent)")
+st.title("🎓 AAU Hybrid FAQ Chatbot (BM25 + FAISS + Intent Classifier)")
 st.caption("Semantic + Keyword + Context-aware Retrieval System")
 
 # =========================================================
@@ -303,7 +303,7 @@ if st.sidebar.button("Run System Evaluation"):
                 else:
                     st.error(f"**Predicted Answer:**\n{r['prediction']}")
             
-            st.markdown(f"**Semantic Similarity Score:** `{r['score']:.4f}` (Threshold: `>= 0.75`)")
+            st.markdown(f"**Semantic Similarity Score:** `{r['score']:.4f}` (Threshold: `>= 0.6`)")
             st.markdown("---")
 
 
@@ -355,3 +355,4 @@ if user_input:
                 st.markdown(f"**Q:** {r['question']}")
                 st.markdown(f"Score: {r['score']:.3f}")
                 st.markdown("---")
+
