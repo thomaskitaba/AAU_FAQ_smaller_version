@@ -2,35 +2,35 @@ import streamlit as st
 import json
 import numpy as np
 import faiss
-from sentence_transformers import SentenceTransformer, util
 
-# -----------------------------
+from sentence_transformers import SentenceTransformer, util
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import LabelEncoder
+
+# =========================================================
 # 1. PAGE CONFIG
-# -----------------------------
+# =========================================================
 st.set_page_config(
     page_title="AAU AI Assistant",
     page_icon="🎓",
     layout="centered"
 )
 
-st.title("🎓 AAU AI Chat Assistant (FAISS + Semantic Search)")
-st.caption("Improved Semantic FAQ system using Sentence-BERT + FAISS (No LLM layer)")
+st.title("🎓 AAU AI Chat Assistant (FAISS + Intent Classifier)")
+st.caption("Semantic FAQ + Follow-up Detection + Evaluation System")
 
-# -----------------------------
-# 2. LOAD MODEL
-# -----------------------------
+# =========================================================
+# 2. LOAD MODEL (SBERT)
+# =========================================================
 @st.cache_resource
 def load_model():
-    return SentenceTransformer(
-        "all-MiniLM-L6-v2",
-        cache_folder="./models"
-    )
+    return SentenceTransformer("all-MiniLM-L6-v2")
 
 model = load_model()
 
-# -----------------------------
-# 3. LOAD DATA
-# -----------------------------
+# =========================================================
+# 3. LOAD FAQ DATA
+# =========================================================
 @st.cache_data
 def load_data():
     with open("faq_data.json", "r", encoding="utf-8") as f:
@@ -41,15 +41,9 @@ faq_data = load_data()
 questions = [item["question"] for item in faq_data]
 answers = [item["answer"] for item in faq_data]
 
-# -----------------------------
-# 4. QUERY PREPROCESSING
-# -----------------------------
-def preprocess(text):
-    return text.lower().strip()
-
-# -----------------------------
-# 5. QUERY EXPANSION
-# -----------------------------
+# =========================================================
+# 4. QUERY EXPANSION
+# =========================================================
 def expand_query(query):
     synonyms = {
         "admission": "admission entry requirement apply university",
@@ -59,24 +53,84 @@ def expand_query(query):
         "deadline": "due date submission deadline"
     }
 
-    for key, value in synonyms.items():
-        if key in query:
-            query += " " + value
+    for k, v in synonyms.items():
+        if k in query.lower():
+            query += " " + v
 
     return query
 
-# -----------------------------
-# 6. EMBEDDINGS
-# -----------------------------
+# =========================================================
+# 5. CHAT MEMORY
+# =========================================================
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+# =========================================================
+# 6. INTENT CLASSIFIER (TRAINING DATA)
+# =========================================================
+train_data = [
+    ("What is the application fee for graduate programs?", "standalone"),
+    ("How do I apply for AAU graduate programs?", "standalone"),
+    ("What is the tuition fee?", "standalone"),
+    ("When is the payment deadline?", "standalone"),
+    ("Where is the admission office?", "standalone"),
+
+    ("How much does it cost?", "follow_up"),
+    ("What about the fee?", "follow_up"),
+    ("Where should I submit them?", "follow_up"),
+    ("And after that?", "follow_up"),
+    ("How do I pay it?", "follow_up"),
+    ("What happens next?", "follow_up"),
+]
+
+texts = [t[0] for t in train_data]
+labels = [t[1] for t in train_data]
+
+label_encoder = LabelEncoder()
+y = label_encoder.fit_transform(labels)
+
+@st.cache_resource
+def train_classifier():
+    X = model.encode(texts, normalize_embeddings=True)
+    clf = LogisticRegression()
+    clf.fit(X, y)
+    return clf
+
+classifier = train_classifier()
+
+def predict_intent(question):
+    vec = model.encode([question], normalize_embeddings=True)
+    pred = classifier.predict(vec)[0]
+    return label_encoder.inverse_transform([pred])[0]
+
+def is_follow_up(question):
+    return predict_intent(question) == "follow_up"
+
+# =========================================================
+# 7. CONTEXT BUILDER
+# =========================================================
+def build_context_query(question):
+    if not is_follow_up(question):
+        return question
+
+    if len(st.session_state.history) == 0:
+        return question
+
+    context = " ".join(st.session_state.history[-2:])
+    return f"{context} {question}"
+
+# =========================================================
+# 8. EMBEDDINGS + FAISS
+# =========================================================
 @st.cache_resource
 def build_embeddings():
     return model.encode(questions, normalize_embeddings=True)
 
 embeddings = build_embeddings()
 
-# -----------------------------
-# 7. FAISS INDEX
-# -----------------------------
 @st.cache_resource
 def build_index():
     dim = embeddings.shape[1]
@@ -86,147 +140,127 @@ def build_index():
 
 index = build_index()
 
-# -----------------------------
-# 8. SEARCH FUNCTION
-# -----------------------------
+# =========================================================
+# 9. SEARCH FUNCTION
+# =========================================================
 def search(query, top_k=5):
-    query = preprocess(query)
+    query = query.lower().strip()
+
+    # intent-aware context injection
+    query = build_context_query(query)
+
+    # expansion
     query = expand_query(query)
 
-    query_vec = model.encode([query], normalize_embeddings=True)
-    scores, indices = index.search(np.array(query_vec), top_k)
+    vec = model.encode([query], normalize_embeddings=True)
+
+    scores, idxs = index.search(np.array(vec), top_k)
 
     results = []
-    for score, idx in zip(scores[0], indices[0]):
+    for score, i in zip(scores[0], idxs[0]):
         results.append({
-            "question": questions[idx],
-            "answer": answers[idx],
+            "question": questions[i],
+            "answer": answers[i],
             "score": float(score)
         })
 
-    results = sorted(results, key=lambda x: x["score"], reverse=True)
-    return results
-
-# -----------------------------
-# 9. CONFIDENCE CHECK
-# -----------------------------
-def is_confident(results):
-    if len(results) < 2:
-        return False
-    return results[0]["score"] > 0.35
-
-# -----------------------------
-# 10. CHAT MEMORY
-# -----------------------------
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+    return sorted(results, key=lambda x: x["score"], reverse=True)
 
 # =========================================================
-# 🧪 EVALUATION DATASET (NEW SECTION)
+# 10. CONFIDENCE
+# =========================================================
+def is_confident(results):
+    return len(results) > 0 and results[0]["score"] > 0.35
+
+# =========================================================
+# 11. EVALUATION DATASET
 # =========================================================
 test_cases = [
     {
         "question": "How much do I need to pay for graduate application?",
-        "expected": "The application fee for Graduate Speciality programs is ETB 500."
+        "expected": "The application fee for Graduate Speciality programs is ETB 500.",
+        "evaluation_level": 1,
+        "evaluation_name": "Exact FAQ Match",
+        "purpose": "Direct retrieval test"
     },
     {
         "question": "Where should I submit my documents?",
-        "expected": "AAU Admission Office, Main Campus Registrar Building, Room 203."
+        "expected": "AAU Admission Office, Main Campus Registrar Building, Room 203.",
+        "evaluation_level": 4,
+        "evaluation_name": "Multi-Hop",
+        "purpose": "Indirect reasoning test"
     },
     {
         "question": "Can I reuse my admission test result?",
-        "expected": "No. The Undergraduate Admission Test (UAT) result is valid only for the specific application cycle."
-    },
-    {
-        "question": "What is the tuition fee payment method?",
-        "expected": "Tuition fees are usually paid in installments per semester, typically two installments per semester or four per year depending on the program."
+        "expected": "No. The Undergraduate Admission Test (UAT) result is valid only for the specific cycle.",
+        "evaluation_level": 3,
+        "evaluation_name": "Keyword Poor",
+        "purpose": "Robust retrieval test"
     }
 ]
 
 # =========================================================
-# 📊 EVALUATION FUNCTIONS
+# 12. EVALUATION
 # =========================================================
 def semantic_score(a, b):
-    emb1 = model.encode(a, convert_to_tensor=True)
-    emb2 = model.encode(b, convert_to_tensor=True)
-    return util.cos_sim(emb1, emb2).item()
-
+    e1 = model.encode(a, convert_to_tensor=True)
+    e2 = model.encode(b, convert_to_tensor=True)
+    return util.cos_sim(e1, e2).item()
 
 def run_evaluation():
-    results_summary = []
     correct = 0
+    results = []
 
-    for item in test_cases:
-        pred_results = search(item["question"])
-        prediction = pred_results[0]["answer"]
+    for t in test_cases:
+        pred = search(t["question"])[0]["answer"]
+        score = semantic_score(pred, t["expected"])
 
-        score = semantic_score(prediction, item["expected"])
-
-        is_correct = score >= 0.75
-        if is_correct:
+        ok = score >= 0.75
+        if ok:
             correct += 1
 
-        results_summary.append({
-            "question": item["question"],
-            "prediction": prediction,
-            "expected": item["expected"],
-            "score": score,
-            "correct": is_correct
-        })
+        results.append({**t, "prediction": pred, "score": score, "correct": ok})
 
-    accuracy = correct / len(test_cases)
-    return accuracy, results_summary
+    return correct / len(test_cases), results
 
 # =========================================================
-# 📊 SIDEBAR DASHBOARD (NEW UI)
+# 13. SIDEBAR DASHBOARD
 # =========================================================
-st.sidebar.title("📊 Evaluation Dashboard")
+st.sidebar.title("📊 Evaluation")
 
 if st.sidebar.button("Run Evaluation"):
-    accuracy, results_summary = run_evaluation()
+    acc, res = run_evaluation()
+    st.sidebar.success(f"Accuracy: {acc:.2f}")
 
-    st.sidebar.success(f"Accuracy: {accuracy:.2f}")
-
-    st.subheader("🧪 Evaluation Results")
-
-    for r in results_summary:
-        if r["correct"]:
-            st.markdown(f"✅ **{r['question']}**")
-        else:
-            st.markdown(f"❌ **{r['question']}**")
-
-        st.markdown(f"- Predicted: {r['prediction']}")
-        st.markdown(f"- Expected: {r['expected']}")
-        st.markdown(f"- Score: {r['score']:.3f}")
+    for r in res:
+        st.markdown("✅" if r["correct"] else "❌")
+        st.markdown(f"Q: {r['question']}")
+        st.markdown(f"Pred: {r['prediction']}")
+        st.markdown(f"Expected: {r['expected']}")
+        st.markdown(f"Score: {r['score']:.3f}")
+        st.markdown(f"Level: {r['evaluation_level']} - {r['evaluation_name']}")
+        st.markdown(f"Purpose: {r['purpose']}")
         st.markdown("---")
 
 # =========================================================
-# 💬 CHAT INTERFACE
+# 14. CHAT UI
 # =========================================================
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-user_input = st.chat_input("Ask anything about AAU...")
+user_input = st.chat_input("Ask about AAU...")
 
 if user_input:
 
-    st.session_state.messages.append({
-        "role": "user",
-        "content": user_input
-    })
-
-    with st.chat_message("user"):
-        st.markdown(user_input)
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    st.session_state.history.append(user_input)
 
     results = search(user_input)
     best = results[0]
 
     if not is_confident(results):
-        response = (
-            "❌ I couldn't find a highly confident answer.\n\n"
-            "Try rephrasing your question or using different keywords."
-        )
+        response = "❌ No confident answer found. Try rephrasing."
     else:
         context = "\n\n".join([
             f"Q: {r['question']}\nA: {r['answer']}"
@@ -234,25 +268,16 @@ if user_input:
         ])
 
         response = f"""
-✅ **Best Answer:**
+✅ **Answer:**
 {best['answer']}
 
 ---
 
-🔎 **Related FAQ Context:**
+🔎 **Context:**
 {context}
 """
 
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": response
-    })
+    st.session_state.messages.append({"role": "assistant", "content": response})
 
     with st.chat_message("assistant"):
         st.markdown(response)
-
-        with st.expander("🔍 Top Matching FAQs (Debug View)"):
-            for r in results:
-                st.markdown(f"**Q:** {r['question']}")
-                st.markdown(f"**Score:** {r['score']:.3f}")
-                st.markdown("---")
